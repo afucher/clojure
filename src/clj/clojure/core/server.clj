@@ -219,49 +219,71 @@
   {:added "1.10"}
   [in-reader out-fn & {:keys [stdin]}]
   (let [EOF (Object.)
-        tapfn #(out-fn {:tag :tap :val %1})]
-    (m/with-bindings
-      (in-ns 'user)
-      (binding [*in* (or stdin in-reader)
-                *out* (PrintWriter-on #(out-fn {:tag :out :val %1}) nil true)
-                *err* (PrintWriter-on #(out-fn {:tag :err :val %1}) nil true)]
-        (try
-          (add-tap tapfn)
-          (loop []
-            (when (try
-                    (let [[form s] (read+string {:eof EOF :read-cond :allow} in-reader)]
-                      (try
-                        (when-not (identical? form EOF)
-                          (let [start (System/nanoTime)
-                                ret (eval form)
-                                ms (quot (- (System/nanoTime) start) 1000000)]
-                            (when-not (= :repl/quit ret)
-                              (set! *3 *2)
-                              (set! *2 *1)
-                              (set! *1 ret)
-                              (out-fn {:tag :ret
-                                       :val (if (instance? Throwable ret)
-                                              (Throwable->map ret)
-                                              ret)
-                                       :ns (str (.name *ns*))
-                                       :ms ms
-                                       :form s})
-                              true)))
-                        (catch Throwable ex
-                          (set! *e ex)
-                          (out-fn {:tag :ret :val (ex->data ex (or (-> ex ex-data :clojure.error/phase) :execution))
-                                   :ns (str (.name *ns*)) :form s
-                                   :exception true})
-                          true)))
-                    (catch Throwable ex
-                      (set! *e ex)
-                      (out-fn {:tag :ret :val (ex->data ex :read-source)
-                               :ns (str (.name *ns*))
-                               :exception true})
-                      true))
-              (recur)))
-          (finally
-           (remove-tap tapfn)))))))
+        tapfn #(out-fn {:tag :tap :val %1})
+        current-form (atom nil)
+        start-time (atom nil)
+        structured-out (PrintWriter-on #(out-fn {:tag :out :val %1}) nil true)
+        structured-err (PrintWriter-on #(out-fn {:tag :err :val %1}) nil true)]
+
+    (binding [*in* (or stdin in-reader)
+              *out* structured-out
+              *err* structured-err]
+     (m/repl
+       :init (fn []
+               (in-ns 'user)
+               (add-tap tapfn))
+       ;; works for the all executions, except first :/
+       :need-prompt (constantly false)
+       :read (fn [request-prompt request-exit]
+               (try
+                 (let [[form s] (read+string {:eof EOF :read-cond :allow} in-reader)]
+                   (reset! current-form s)
+                   (cond
+                     (identical? form EOF) request-exit
+                     (= form :repl/quit) request-exit
+                     :else (do
+                             (reset! start-time (System/nanoTime))
+                             form)))
+                 (catch Throwable ex
+                   (out-fn {:tag       :ret
+                            :val       (ex->data ex :read-source)
+                            :ns        (str (.name *ns*))
+                            :exception true})
+                   request-prompt)))
+
+       ;; in the original prepl eval it does not call set! *1 when is repl/quit
+       #_#_ :eval (fn [form]
+                    (binding [*in* (or stdin in-reader)
+                              *out* structured-out
+                              *err* structured-err]
+                      (eval form)))
+
+       :print (fn [value]
+                ;;this time calculation should be here or in eval?
+                ;; they are pretty similar, but here is called after set! *1
+                ;; but in eval I need another atom (?)
+                (let [ms (quot (- (System/nanoTime) @start-time) 1000000)]
+                  (when-not (= value :repl/quit)
+                    (out-fn {:tag  :ret
+                             :val  (if (instance? Throwable value)
+                                     (Throwable->map value)
+                                     value)
+                             :ns   (str (.name *ns*))
+                             :ms   ms
+                             :form @current-form}))))
+
+       :caught (fn [ex]
+                 ;; this is called in read, eval, print.
+                 ;; old implementation just put ms info for eval
+                 (let [ms (quot (- (System/nanoTime) @start-time) 1000000)]
+                   (out-fn {:tag       :ret
+                            :val       (ex->data ex (or (-> ex ex-data :clojure.error/phase) :execution))
+                            :ns        (str (.name *ns*))
+                            :form      @current-form
+                            :exception true
+                            :ms        ms})))))
+
+    (remove-tap tapfn)))
 
 (defn- resolve-fn [valf]
   (if (symbol? valf)
