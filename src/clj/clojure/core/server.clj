@@ -218,53 +218,52 @@
   Alpha, subject to change."
   {:added "1.10"}
   [in-reader out-fn & {:keys [stdin]}]
-  (let [cl (.getContextClassLoader (Thread/currentThread))]
-    (.setContextClassLoader (Thread/currentThread) (DynamicClassLoader. cl)))
-  (let [EOF (Object.)
-        tapfn #(out-fn {:tag :tap :val %1})]
-    (m/with-bindings
-      (in-ns 'user)
-      (binding [*repl* true
-                *in* (or stdin in-reader)
-                *out* (PrintWriter-on #(out-fn {:tag :out :val %1}) nil true)
-                *err* (PrintWriter-on #(out-fn {:tag :err :val %1}) nil true)]
-        (try
-          (add-tap tapfn)
-          (loop []
-            (when (try
-                    (let [[form s] (read+string {:eof EOF :read-cond :allow} in-reader)]
-                      (try
-                        (when-not (identical? form EOF)
-                          (let [start (System/nanoTime)
-                                ret (eval form)
-                                ms (quot (- (System/nanoTime) start) 1000000)]
-                            (when-not (= :repl/quit ret)
-                              (set! *3 *2)
-                              (set! *2 *1)
-                              (set! *1 ret)
-                              (out-fn {:tag :ret
-                                       :val (if (instance? Throwable ret)
-                                              (Throwable->map ret)
-                                              ret)
-                                       :ns (str (.name *ns*))
-                                       :ms ms
-                                       :form s})
-                              true)))
-                        (catch Throwable ex
-                          (set! *e ex)
-                          (out-fn {:tag :ret :val (ex->data ex (or (-> ex ex-data :clojure.error/phase) :execution))
-                                   :ns (str (.name *ns*)) :form s
-                                   :exception true})
-                          true)))
-                    (catch Throwable ex
-                      (set! *e ex)
-                      (out-fn {:tag :ret :val (ex->data ex :read-source)
-                               :ns (str (.name *ns*))
-                               :exception true})
-                      true))
-              (recur)))
-          (finally
-           (remove-tap tapfn)))))))
+  (m/with-dynamic-class-loader
+    (let [EOF (Object.)
+          tapfn #(out-fn {:tag :tap :val %1})]
+      (m/with-bindings
+        (in-ns 'user)
+        (binding [*repl* true
+                  *in* (or stdin in-reader)
+                  *out* (PrintWriter-on #(out-fn {:tag :out :val %1}) nil true)
+                  *err* (PrintWriter-on #(out-fn {:tag :err :val %1}) nil true)]
+          (try
+            (add-tap tapfn)
+            (loop []
+              (when (try
+                      (let [[form s] (read+string {:eof EOF :read-cond :allow} in-reader)]
+                        (try
+                          (when-not (identical? form EOF)
+                            (let [start (System/nanoTime)
+                                  ret (eval form)
+                                  ms (quot (- (System/nanoTime) start) 1000000)]
+                              (when-not (= :repl/quit ret)
+                                (set! *3 *2)
+                                (set! *2 *1)
+                                (set! *1 ret)
+                                (out-fn {:tag :ret
+                                         :val (if (instance? Throwable ret)
+                                                (Throwable->map ret)
+                                                ret)
+                                         :ns (str (.name *ns*))
+                                         :ms ms
+                                         :form s})
+                                true)))
+                          (catch Throwable ex
+                            (set! *e ex)
+                            (out-fn {:tag :ret :val (ex->data ex (or (-> ex ex-data :clojure.error/phase) :execution))
+                                     :ns (str (.name *ns*)) :form s
+                                     :exception true})
+                            true)))
+                      (catch Throwable ex
+                        (set! *e ex)
+                        (out-fn {:tag :ret :val (ex->data ex :read-source)
+                                 :ns (str (.name *ns*))
+                                 :exception true})
+                        true))
+                (recur)))
+            (finally
+             (remove-tap tapfn))))))))
 
 (defn- resolve-fn [valf]
   (if (symbol? valf)

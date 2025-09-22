@@ -358,6 +358,13 @@ by default when a new command-line REPL is started."} repl-requires
     [clojure.pprint :refer (pp pprint)]
     [clojure.repl.deps :refer (add-libs add-lib sync-deps)]])
 
+(defmacro with-dynamic-class-loader
+  "Evaluates body with the context class loader set to a DynamicClassLoader."
+  [& body]
+  `(let [cl# (.getContextClassLoader (Thread/currentThread))]
+     (.setContextClassLoader (Thread/currentThread) (clojure.lang.DynamicClassLoader. cl#))
+     ~@body))
+
 (defmacro with-read-known
   "Evaluates body with *read-eval* set to a \"known\" value,
    i.e. substituting true for :unknown if necessary."
@@ -409,9 +416,8 @@ by default when a new command-line REPL is started."} repl-requires
        read, eval, or print throws an exception or error
        default: repl-caught"
   [& options]
-  (let [cl (.getContextClassLoader (Thread/currentThread))]
-    (.setContextClassLoader (Thread/currentThread) (clojure.lang.DynamicClassLoader. cl)))
-  (let [{:keys [init need-prompt prompt flush read eval print caught]
+  (with-dynamic-class-loader
+    (let [{:keys [init need-prompt prompt flush read eval print caught]
          :or {init        #()
               need-prompt (if (instance? LineNumberingPushbackReader *in*)
                             #(.atLineStart ^LineNumberingPushbackReader *in*)
@@ -464,7 +470,7 @@ by default when a new command-line REPL is started."} repl-requires
            (when (need-prompt)
              (prompt)
              (flush))
-           (recur)))))))
+           (recur))))))))
 
 (defn load-script
   "Loads Clojure source from a file or resource given its path. Paths
