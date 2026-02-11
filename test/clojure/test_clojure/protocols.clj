@@ -696,6 +696,38 @@
 (import 'clojure.lang.ISeq)
 (defprotocol P
   (^ISeq f [_]))
+
+;; CLJ-1548
+
+(defprotocol PrimHinted
+  (prim-hinted [_ ^long n]))
+
+(defprotocol NonPrimHinted
+  (non-prim [^String a ^Number b]))
+
+(defprotocol MaxPrimHinted
+  (max-prim [_ ^long a ^double b ^long c ^long d ^long e]))
+
+(extend-protocol PrimHinted
+  String
+  (prim-hinted [s n]
+    (apply str (repeat n s))))
+
+(extend-protocol NonPrimHinted
+  String
+  (non-prim [a b]
+    (str a ":" b)))
+
+(extend-protocol MaxPrimHinted
+  String
+  (max-prim [s a b c d e]
+    (str s " " (+ a b c d e))))
+
+(deftest test-prim-param-hints-ignored-test
+  (is (= "abcabc" (prim-hinted "abc" 2)))
+  (is (= "text:99" (non-prim "text" 99)))
+  (is (= "sum 8.5" (max-prim "sum" 1 2.5 3 1 1))))
+
 (ns clojure.test-clojure.protocols.other
   (:use clojure.test))
 (defn cf [val]

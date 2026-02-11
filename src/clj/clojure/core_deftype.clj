@@ -669,7 +669,16 @@
                                 (loop [as [] rs (rest s)]
                                   (if (vector? (first rs))
                                     (recur (conj as (first rs)) (next rs))
-                                    [(seq as) (first rs)]))]
+                                    [(seq as) (first rs)]))
+                                strip-prim-param-hints (fn [arglist]
+                                                         (with-meta
+                                                           (into [] (map (fn [param]
+                                                                       (if (disallowed? (:tag (meta param)))
+                                                                         (with-meta param (dissoc (meta param) :tag))
+                                                                         param)))
+                                                                 arglist)
+                                                           (meta arglist)))
+                                arglists (map strip-prim-param-hints arglists)]
                             (when (some #{0} (map count arglists))
                               (throw (IllegalArgumentException. (str "Definition of function " mname " in protocol " name " must take at least one arg."))))
                             (when (m (keyword mname))
