@@ -696,6 +696,19 @@
 (import 'clojure.lang.ISeq)
 (defprotocol P
   (^ISeq f [_]))
+
+;; CLJ-1548
+
+(defprotocol Foo
+  (foo [_ ^long n]))
+(extend-protocol Foo
+  String
+  (foo [s n]
+    (apply str (repeat n s))))
+
+(deftest test-prim-param-hints-ignored-test
+  (is (= "abcabc" (foo "abc" 2))))
+
 (ns clojure.test-clojure.protocols.other
   (:use clojure.test))
 (defn cf [val]
@@ -719,3 +732,4 @@
        (eval '(f1 (reify PrimHinted) :foo))))
   (is (= :foo  (f1 (reify PrimHinted (f1 [_ x] x)) :foo)))
   (is (= "foo" (f2 (reify PrimHinted (f2 [_] "foo"))))))
+  
